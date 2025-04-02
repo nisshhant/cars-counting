@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Tracking System</title>
+    <style>
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f5f5f5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+}
+.container {
+    width: 100%;
+    max-width: 1200px;
+    height: 100vh;
+    background-color: white;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    overflow-y: auto;
+}
+h1 {
+    text-align: center;
+    color: #333;
+}
+.video-container {
+    position: relative;
+    width: 100%;
+    max-height: 500px;
+    background-color: black;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+#video-feed {
+    max-width: 100%;
+    max-height: 100%;
+    display: none;
+}
+.video-placeholder {
+    color: white;
+    font-size: 1.2em;
+}
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+button {
+    padding: 12px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+button:hover {
+    background-color: #45a049;
+}
+button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+.counters {
+    display: flex;
+    justify-content: space-around;
+    width: 100%;
+    margin-bottom: 20px;
+    font-size: 1.2em;
+}
+.counter {
+    text-align: center;
+    padding: 15px;
+    background-color: #f0f0f0;
+    border-radius: 6px;
+    min-width: 150px;
+}
+.counter-value {
+    font-size: 1.5em;
+    font-weight: bold;
+}
+.upload-area {
+    border: 2px dashed #ccc;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 20px;
+    border-radius: 6px;
+}
+.status {
+    padding: 10px;
+    background-color: #e7f3fe;
+    border-left: 6px solid #2196F3;
+    margin-bottom: 20px;
+}
+.progress-container {
+    width: 100%;
+    background-color: #f1f1f1;
+    border-radius: 4px;
+    margin: 10px 0;
+    display: none;
+}
+#progress-bar {
+    width: 0%;
+    height: 30px;
+    background-color: #4CAF50;
+    border-radius: 4px;
+    text-align: center;
+    line-height: 30px;
+    color: white;
+}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Car Tracking System</h1>
+        
+        <div class="upload-area">
+            <h3>Upload Video</h3>
+            <form id="upload-form">
+                <input type="file" id="video-input" value = "300" name="video" accept=".mp4,.avi,.mov" required>
+                <button type="button" id="upload-btn">Upload and Process</button>
+            </form>
+            <div class="progress-container" id="progress-container">
+                <div id="progress-bar">0%</div>
+            </div>
+        </div>
+        
+        <div class="status" id="status">
+            Ready to upload video
+        </div>
+        
+        <div class="video-container">
+            <div class="video-placeholder" id="video-placeholder">No video loaded</div>
+            <img id="video-feed" alt="Video Feed">
+        </div>
+        
+        <div class="controls">
+            <button id="play-btn" disabled>Play</button>
+            <button id="pause-btn" disabled>Pause</button>
+            <button id="stop-btn" disabled>Stop</button>
+            <button id="reset-up-btn">Reset Up Counter</button>
+            <button id="reset-down-btn">Reset Down Counter</button>
+            <button id="reset-all-btn">Reset All</button>
+        </div>
+        <div>
+        <input type="number" id="thresholdInput" placeholder="Enter new threshold">
+        <button onclick="updateThreshold()">Update</button>
+        </div>
+        
+        <div class="counters">
+            <div class="counter">
+                <div>Up Count</div>
+                <div class="counter-value" id="up-count">{{ cars_count_up }}</div>
+            </div>
+            <div class="counter">
+                <div>Down Count</div>
+                <div class="counter-value" id="down-count">{{ cars_count_down }}</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM elements
+        const uploadBtn = document.getElementById('upload-btn');
+        const videoInput = document.getElementById('video-input');
+        const videoFeed = document.getElementById('video-feed');
+        const videoPlaceholder = document.getElementById('video-placeholder');
+        const statusElement = document.getElementById('status');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const playBtn = document.getElementById('play-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const resetUpBtn = document.getElementById('reset-up-btn');
+        const resetDownBtn = document.getElementById('reset-down-btn');
+        const resetAllBtn = document.getElementById('reset-all-btn');
+        const upCountElement = document.getElementById('up-count');
+        const downCountElement = document.getElementById('down-count');
+
+        // Global variables
+        let isProcessing = false;
+        let countersUpdateInterval;
+
+        // Upload and process video
+        uploadBtn.addEventListener('click', async () => {
+            if (!videoInput.files || videoInput.files.length === 0) {
+                updateStatus('Please select a video file first', 'error');
+                return;
+            }
+
+            const file = videoInput.files[0];
+            const formData = new FormData();
+            formData.append('video', file);
+
+            try {
+                // Show progress
+                progressContainer.style.display = 'block';
+                progressBar.style.width = '30%';
+                progressBar.textContent = '30%';
+                updateStatus('Uploading video...');
+
+                // Upload video
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                progressBar.style.width = '60%';
+                progressBar.textContent = '60%';
+                updateStatus('Processing video...');
+
+                // Start video feed
+                startVideoFeed();
+                enableControls(true);
+                updateStatus('Video processing started');
+
+                // Update progress to complete
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+
+                // Hide progress after a delay
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                }, 2000);
+
+                // Start updating counters
+                startCountersUpdate();
+
+            } catch (error) {
+                console.error('Error:', error);
+                updateStatus(`Error: ${error.message}`, 'error');
+                progressContainer.style.display = 'none';
+            }
+        });
+
+        // Start video feed
+        function startVideoFeed() {
+            videoPlaceholder.style.display = 'none';
+            videoFeed.style.display = 'block';
+            videoFeed.src = '/video_feed?' + new Date().getTime(); // Add timestamp to prevent caching
+        }
+
+        // Update status message
+        function updateStatus(message, type = 'info') {
+            statusElement.textContent = message;
+            if (type === 'error') {
+                statusElement.style.backgroundColor = '#ffebee';
+                statusElement.style.borderLeftColor = '#f44336';
+            } else if (type === 'success') {
+                statusElement.style.backgroundColor = '#e8f5e9';
+                statusElement.style.borderLeftColor = '#4CAF50';
+            } else {
+                statusElement.style.backgroundColor = '#e7f3fe';
+                statusElement.style.borderLeftColor = '#2196F3';
+            }
+        }
+
+        // Enable/disable control buttons
+        function enableControls(enabled) {
+            playBtn.disabled = !enabled;
+            pauseBtn.disabled = !enabled;
+            stopBtn.disabled = !enabled;
+            if (enabled) {
+                playBtn.style.backgroundColor = '#4CAF50';
+                pauseBtn.style.backgroundColor = '#FFC107';
+                stopBtn.style.backgroundColor = '#F44336';
+            } else {
+                playBtn.style.backgroundColor = pauseBtn.style.backgroundColor = stopBtn.style.backgroundColor = '#cccccc';
+            }
+        }
+
+        // Start updating counters periodically
+        function startCountersUpdate() {
+            if (countersUpdateInterval) {
+                clearInterval(countersUpdateInterval);
+            }
+            countersUpdateInterval = setInterval(updateCounters, 1000);
+        }
+
+        // Update counters from server
+        async function updateCounters() {
+            try {
+                const response = await fetch('/counters');
+                const data = await response.json();
+                upCountElement.textContent = data.up;
+                downCountElement.textContent = data.down;
+            } catch (error) {
+                console.error('Error updating counters:', error);
+            }
+        }
+
+        // Control buttons event listeners
+        playBtn.addEventListener('click', () => {
+            fetch('/control?action=play')
+                .then(response => response.json())
+                .then(data => updateStatus('Video resumed'))
+                .catch(error => updateStatus(`Error: ${error.message}`, 'error'));
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            fetch('/control?action=pause')
+                .then(response => response.json())
+                .then(data => updateStatus('Video paused'))
+                .catch(error => updateStatus(`Error: ${error.message}`, 'error'));
+        });
+
+        stopBtn.addEventListener('click', () => {
+            fetch('/control?action=stop')
+                .then(response => response.json())
+                .then(data => {
+                    updateStatus('Video stopped');
+                    videoFeed.style.display = 'none';
+                    videoPlaceholder.style.display = 'block';
+                    enableControls(false);
+                    clearInterval(countersUpdateInterval);
+                })
+                .catch(error => updateStatus(`Error: ${error.message}`, 'error'));
+        });
+
+        resetUpBtn.addEventListener('click', () => {
+            fetch('/control?action=reset_up')
+                .then(response => response.json())
+                .then(data => {
+                    upCountElement.textContent = '0';
+                    updateStatus('Up counter reset');
+                })
+                .catch(error => updateStatus(`Error: ${error.message}`, 'error'));
+        });
+
+        resetDownBtn.addEventListener('click', () => {
+            fetch('/control?action=reset_down')
+                .then(response => response.json())
+                .then(data => {
+                    downCountElement.textContent = '0';
+                    updateStatus('Down counter reset');
+                })
+                .catch(error => updateStatus(`Error: ${error.message}`, 'error'));
+        });
+
+        resetAllBtn.addEventListener('click', () => {
+            fetch('/control?action=reset_all')
+                .then(response => response.json())
+                .then(data => {
+                    upCountElement.textContent = '0';
+                    downCountElement.textContent = '0';
+                    updateStatus('All counters reset');
+                })
+                .catch(error => updateStatus(`Error: ${error.message}`, 'error'));
+        });
+
+        function updateThreshold() {
+            let newValue = document.getElementById("thresholdInput").value;
+            
+            fetch('/update_threshold', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ new_value: newValue })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                   console.log("line position changed")
+                } else {
+                    alert("Error updating threshold: " + data.error);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+</html>

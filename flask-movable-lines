@@ -1,0 +1,193 @@
+from flask import Flask, render_template, request, jsonify, Response
+import cv2
+from ultralytics import YOLO
+import numpy as np
+from sort import *
+import os
+from werkzeug.utils import secure_filename
+import threading
+import time
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov'}
+
+# Initialize YOLO model
+model = YOLO("YOLO-Weights/yolov8n.pt")
+
+# Global variables for tracking
+tracker = Sort(max_age=20, min_hits=3)
+cars_count_up = 0
+cars_count_down = 0
+tracked_cars = {}
+unique_cars = set()
+stuck_cars = set()
+running = False
+paused = False
+current_video = None
+processing_thread = None
+
+# Modifiable Y-coordinate reference line
+line_y_reference = 300  # Change this value to set the counting threshold
+
+@app.route('/update_threshold', methods=['POST'])
+def update_threshold():
+    global line_y_reference
+    try:
+        data = request.json
+        line_y_reference = int(data['new_value'])  # Convert input to an integer
+        return jsonify({'success': True, 'new_value': line_y_reference})
+    except (KeyError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid value'})
+
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+def process_video(video_path):
+    global running, paused, cars_count_up, cars_count_down, tracked_cars, unique_cars, stuck_cars, line_y_reference
+    
+    cap = cv2.VideoCapture(video_path)
+    running = True
+    paused = False
+    
+    while running and cap.isOpened():
+        if not paused:
+            success, frame = cap.read()
+            if not success:
+                break
+            
+            results = model(frame, stream=True)
+            detections = []
+            
+            for r in results:
+                for box in r.boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    conf = round(float(box.conf[0]), 2)
+                    cls = int(box.cls[0])
+                    if cls in [2, 3, 5]:  # Car, motorcycle, bus
+                        detections.append([x1, y1, x2, y2, conf])
+            
+            tracked_objects = tracker.update(np.array(detections))
+            
+            for obj in tracked_objects:
+                x1, y1, x2, y2, track_id = map(int, obj)
+                cy = (y1 + y2) // 2  # Midpoint of vehicle
+
+                if track_id not in unique_cars:
+                    unique_cars.add(track_id)
+                    tracked_cars[track_id] = cy
+                    stuck_cars.add(track_id)
+                else:
+                    prev_cy = tracked_cars[track_id]
+                    if prev_cy < line_y_reference and cy >= line_y_reference:  # Moving downward
+                        cars_count_down += 1
+                        stuck_cars.discard(track_id)
+                    elif prev_cy > line_y_reference and cy <= line_y_reference:  # Moving upward
+                        cars_count_up += 1
+                        stuck_cars.discard(track_id)
+                    tracked_cars[track_id] = cy
+        else:
+            time.sleep(0.1)
+    
+    cap.release()
+
+@app.route('/')
+def index():
+    return render_template('index.html',line_y_reference=line_y_reference)
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+def generate_frames():
+    global current_video, running, paused, line_y_reference
+    
+    if not current_video:
+        return
+    
+    cap = cv2.VideoCapture(current_video)
+    
+    while running and cap.isOpened():
+        if not paused:
+            success, frame = cap.read()
+            if not success:
+                break
+            
+            results = model(frame, stream=True)
+            detections = []
+            
+            for r in results:
+                for box in r.boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    conf = round(float(box.conf[0]), 2)
+                    cls = int(box.cls[0])
+                    if cls in [2, 3, 5]:  # Car, motorcycle, bus
+                        detections.append([x1, y1, x2, y2, conf])
+            
+            tracked_objects = tracker.update(np.array(detections))
+            
+            for obj in tracked_objects:
+                x1, y1, x2, y2, track_id = map(int, obj)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, f"ID: {track_id}", (x1, y1-10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            
+            cv2.line(frame, (0, line_y_reference), (frame.shape[1], line_y_reference), (255, 0, 0), 2)
+            cv2.putText(frame, f"Up: {cars_count_up}", (20, 40), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2)
+            cv2.putText(frame, f"Down: {cars_count_down}", (20, 80), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 2)
+            
+            ret, buffer = cv2.imencode('.jpg', frame)
+            if not ret:
+                continue
+            
+            frame = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        else:
+            time.sleep(0.1)
+    
+    cap.release()
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    global current_video, running, paused, processing_thread
+    
+    if 'video' not in request.files:
+        return jsonify({"error": "No video file"}), 400
+        
+    file = request.files['video']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Invalid file type"}), 400
+    
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    
+    current_video = filepath
+    running = True
+    paused = False
+    
+    global cars_count_up, cars_count_down
+    cars_count_up = 0
+    cars_count_down = 0
+    
+    if not (processing_thread and processing_thread.is_alive()):
+        processing_thread = threading.Thread(target=process_video, args=(filepath,))
+        processing_thread.start()
+    
+    return jsonify({
+        "status": "success",
+        "message": "Video uploaded and processing started"
+    })
+
+if __name__ == '__main__':
+    if not os.path.exists(app.config['UPLOAD_FOLDER']):
+        os.makedirs(app.config['UPLOAD_FOLDER'])
+    app.run(debug=True)
