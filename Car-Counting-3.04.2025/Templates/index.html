@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTSP Car Tracking</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex flex-col items-center p-8 min-h-screen">
+    <h1 class="text-4xl font-extrabold text-gray-900 mb-8">RTSP Car Tracking</h1>
+    <div id="video-container" class="mt-8 w-full max-w-4xl flex justify-center">
+        <img id="video_feed" src="" class="w-full max-w-4xl h-auto border rounded-xl shadow-lg">
+    </div>
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-2xl">
+        <input type="text" id="rtsp_url" placeholder="Enter RTSP URL" value="rtsp://admin:Admin@123@192.168.1.123:554/profile1" class="w-full p-3 border border-gray-300 rounded-lg mb-6 text-lg">
+
+        <div class="flex space-x-4">
+            <button onclick="startStream()" class="bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">Start Stream</button>
+            <button onclick="stopStream()" class="bg-red-600 text-white px-5 py-3 rounded-lg font-semibold hover:bg-red-700 transition">Stop Stream</button>
+        </div>
+
+        <div class="mt-6">
+            <label for="line_y" class="block text-gray-700 text-lg font-medium">Set Line Position:</label>
+            <div class="flex items-center space-x-3 mt-3">
+                <input type="number" id="line_y" value="270" class="w-full p-3 border border-gray-300 rounded-lg text-lg">
+                <button onclick="updateLine()" class="bg-green-600 text-white px-5 py-3 rounded-lg font-semibold hover:bg-green-700 transition">Update</button>
+            </div>
+        </div>
+
+        <button onclick="ResetCount()" class="mt-6 bg-yellow-500 text-white px-5 py-3 rounded-lg font-semibold hover:bg-yellow-600 transition w-full">Reset Count</button>
+    </div>
+
+
+
+    <script>
+        function startStream() {
+            let rtsp_url = document.getElementById("rtsp_url").value;
+            $.ajax({
+                url: "/start",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ rtsp_url: rtsp_url }),
+                success: function (response) {
+                    alert(response.message);
+                    document.getElementById("video_feed").src = "/video_feed";
+                },
+                error: function (xhr) {
+                    alert("Error: " + xhr.responseText);
+                }
+            });
+        }
+
+        function ResetCount() {
+            $.ajax({
+                url: "/ResetCount",
+                type: "POST",
+                success: function (response) {
+                    alert(response.message);
+                },
+                error: function (xhr) {
+                    alert("Error: " + xhr.responseText);
+                }
+            });
+        }
+
+        function stopStream() {
+            $.ajax({
+                url: "/stop",
+                type: "POST",
+                success: function (response) {
+                    alert(response.message);
+                    document.getElementById("video_feed").src = "";
+                },
+                error: function (xhr) {
+                    alert("Error: " + xhr.responseText);
+                }
+            });
+        }
+
+        function updateLine() {
+            let line_y = document.getElementById("line_y").value;
+            $.ajax({
+                url: "/update_line",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ line_y: line_y }),
+                success: function (response) {
+                    alert(response.message);
+                },
+                error: function (xhr) {
+                    alert("Error: " + xhr.responseText);
+                }
+            });
+        }
+    </script>
+</body>
+</html>

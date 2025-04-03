@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Video Processing</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        input {
+            width: 60%;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            cursor: pointer;
+        }
+        #video-container {
+            margin-top: 20px;
+        }
+        img {
+            width: 640px;
+            height: 480px;
+            border: 2px solid black;
+        }
+    </style>
+</head>
+<body>
+    <h1>YOLO Video Object Detection</h1>
+    <input type="text" id="youtube_url" placeholder="Enter YouTube Video URL">
+    <br>
+    <button onclick="startProcessing()">Start Processing</button>
+    <button onclick="stopProcessing()">Stop Processing</button>
+    
+    <div id="video-container">
+        <h2>Live Video Feed</h2>
+        <img id="video_feed" src="/video_feed" alt="Video Stream">
+    </div>
+
+    <script>
+        function startProcessing() {
+            const youtubeUrl = document.getElementById('youtube_url').value;
+            fetch('/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ youtube_url: youtubeUrl })
+            }).then(response => response.json())
+              .then(data => alert(data.message || data.error));
+        }
+        
+        function stopProcessing() {
+            fetch('/stop', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => alert(data.message || data.error));
+        }
+    </script>
+</body>
+</html>
